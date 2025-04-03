@@ -2,7 +2,6 @@
 #define BLYNK_TEMPLATE_NAME "SmartPlantPot"
 #define BLYNK_AUTH_TOKEN "53H5FdD6-H4C_K7ks67E8u7g2SORAplK"
 
-
 #include <WiFi.h>
 #include <BlynkSimpleEsp32.h>
 #include <Adafruit_Sensor.h>
@@ -23,6 +22,7 @@ char auth[] = BLYNK_AUTH_TOKEN;
 int temperature, humidity, moisture;
 bool pumpState = false;
 unsigned long lastPumpTime = 0;
+unsigned long lastReadTime = 0;
 #define PUMP_DELAY 5000  // 5 giây
 #define LED_PIN 4
 #define DHTPIN 5
@@ -30,7 +30,8 @@ unsigned long lastPumpTime = 0;
 #define PUMP_PIN 18
 const int moisturePin = 34;
 DHT dht(DHTPIN, DHTTYPE);
-// Hàm nhập WiFi từ Serial Monitor cho đến khi ấn Enter (hỗ trợ dấu cách)
+
+// Hàm nhập WiFi từ Serial Monitor
 void getWiFiCredentials() {
     Serial.println("\nNhập tên WiFi: ");
     while (!Serial.available()) { }
@@ -67,7 +68,7 @@ void connectToWiFi() {
     }
 }
 
-// Kiểm tra kết nối WiFi và tự động kết nối lại
+// Kiểm tra kết nối WiFi & Blynk
 void checkWiFiConnection() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("⚠️ Mất kết nối WiFi! Đang thử lại...");
@@ -86,25 +87,21 @@ void checkWiFiConnection() {
             delay(30000);
         }
     }
+    if (!Blynk.connected()) {
+        Serial.println("⚠️ Mất kết nối Blynk! Đang thử lại...");
+        Blynk.begin(auth, ssid, password);
+    }
 }
 
-// Đọc dữ liệu cảm biến thật
-// void readSensors() {
-//     temperature = random(20, 40);  // Dữ liệu mẫu
-//     humidity = random(40, 90);    
-//     moisture = analogRead(MOISTURE_SENSOR_PIN) / 40;  // Chuyển đổi về %
-//     Serial.printf("🌡 Nhiệt độ: %d°C\n💧 Độ ẩm không khí: %d%%\n🌱 Độ ẩm đất: %d%%\n", temperature, humidity, moisture);
-// }
-
-// Điều khiển máy bơm có trễ
+// Điều khiển máy bơm
 void controlPump() {
-    if (moisture <= 30 && !pumpState && millis() - lastPumpTime > PUMP_DELAY) {
+    if (moisture < 25 && !pumpState) {
         digitalWrite(PUMP_PIN, HIGH);
         pumpState = true;
         lastPumpTime = millis();
-        Serial.println("🟢 Bật máy bơm - Đất khô!");
+        Serial.println("🟢 Bật máy bơm - Đất rất khô!");
     } 
-    else if (moisture >= 60 && pumpState && millis() - lastPumpTime > PUMP_DELAY) {
+    else if (moisture > 65 && pumpState) {
         digitalWrite(PUMP_PIN, LOW);
         pumpState = false;
         lastPumpTime = millis();
@@ -118,29 +115,30 @@ void setup() {
     pinMode(LED_PIN, OUTPUT);
     pinMode(PUMP_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
+    dht.begin();
 
-    getWiFiCredentials();  // Nhập WiFi từ Serial (hỗ trợ dấu cách)
+    getWiFiCredentials();
     connectToWiFi();
     Blynk.begin(auth, ssid, password);
 }
 
 void loop() {
     Blynk.run();
-    int soilMoistureValue = analogRead(moisturePin);
-    moisture = map(soilMoistureValue, 4095, 0, 0, 100);
-    
-    // Đọc nhiệt độ & độ ẩm từ DHT11
-    float temp = dht.readTemperature();
-    float hum = dht.readHumidity();
-    Serial.printf("🌡 Nhiệt độ: %d°C\n💧 Độ ẩm không khí: %d%%\n🌱 Độ ẩm đất: %d%%\n", temperature, humidity, moisture);
     checkWiFiConnection();
-    // readSensors();
-    controlPump();
-    
-    // Gửi dữ liệu lên Blynk
-    Blynk.virtualWrite(VIRTUAL_TEMP, temperature);
-    Blynk.virtualWrite(VIRTUAL_HUMID, humidity);
-    Blynk.virtualWrite(VIRTUAL_MOIST, moisture);
-    
-    delay(5000);
+
+    if (millis() - lastReadTime > 5000) {
+        lastReadTime = millis();
+
+        moisture = map(analogRead(moisturePin), 4095, 0, 0, 100);
+        temperature = dht.readTemperature();
+        humidity = dht.readHumidity();
+
+        Serial.printf("🌡 Nhiệt độ: %d°C\n💧 Độ ẩm không khí: %d%%\n🌱 Độ ẩm đất: %d%%\n", 
+                      temperature, humidity, moisture);
+
+        controlPump();
+        Blynk.virtualWrite(VIRTUAL_TEMP, temperature);
+        Blynk.virtualWrite(VIRTUAL_HUMID, humidity);
+        Blynk.virtualWrite(VIRTUAL_MOIST, moisture);
+    }
 }
